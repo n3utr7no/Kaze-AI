@@ -179,6 +179,4 @@ The project is designed with a clear separation between the Client (Presentation
       - Relies on the free tier of Groq and OpenWeatherMap, which restricts the number of concurrent requests per minute.
 
 
-```Live
-https://kaze-ai.vercel.app/
-```
+**Live Link** - https://kaze-ai.vercel.app/
