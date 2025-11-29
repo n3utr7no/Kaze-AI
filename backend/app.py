@@ -120,7 +120,18 @@ def transcribe():
         if os.path.exists(filename): os.remove(filename)
             
         trans_res = call_llm([
-            {"role": "system", "content": "Translate Japanese to English only."}, 
+            {
+                "role": "system", 
+                "content": """
+                You are a strict translation engine. 
+                Task: Translate the user's text into English.
+                CRITICAL RULES:
+                1. Do NOT answer the question.
+                2. Do NOT say "I cannot check the weather".
+                3. Do NOT add explanations.
+                4. Output ONLY the translated text.
+                """
+            }, 
             {"role": "user", "content": transcription.text}
         ])
         
@@ -170,7 +181,7 @@ def generate_plan():
         else:
             weather_data = get_weather_forecast(target_city, analysis.get("day_offset", 0))
 
-        # 5. PHASE 3: PLANNING (IMPROVED PROMPT)
+        # 5. PHASE 3: PLANNING 
         lang_instruction = "ENGLISH" if req_data.language == 'English' else "JAPANESE (日本語)"
         time_example = "Morning / 9:00 AM" if req_data.language == 'English' else "朝 / 9:00"
 
