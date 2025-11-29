@@ -3,12 +3,12 @@ import axios from 'axios';
 import {
   Mic, RefreshCw, ExternalLink, Languages, Sparkles, Send,
   Plane, Shirt, Music, Sprout, Trophy, Globe, Wind, Info,
-  Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Volume2, Square
+  Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Volume2, Square, StopCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Vite environment variable, fallback to localhost for dev
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5001';
 
 // --- Configuration & Theming ---
 const CATEGORY_THEMES = {
@@ -46,7 +46,6 @@ export default function App() {
   const [transcriptData, setTranscriptData] = useState({ ja: "", en: "" });
   const [inputText, setInputText] = useState("");
   const [playingIndex, setPlayingIndex] = useState(null);
-
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const messagesEndRef = useRef(null);
@@ -189,25 +188,24 @@ export default function App() {
 
   // --- Text-to-Speech ---
 
-  const toggleAudio = (text, index) => {
-    // If clicking the actively playing message, stop it
-    if (playingIndex === index) {
-      window.speechSynthesis.cancel();
+  const toggleAudio = (text, idx) => {
+    window.speechSynthesis.cancel();
+
+    if (playingIndex === idx) {
       setPlayingIndex(null);
       return;
     }
 
-    // Otherwise, play new (browser automatically queues/interrupts based on implementation)
-    window.speechSynthesis.cancel();
-
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = targetLang === 'English' ? 'en-US' : 'ja-JP';
-    utterance.rate = 1.0;
+
+    // Slow down slightly for Japanese to be clearer
+    utterance.rate = targetLang === 'Japanese' ? 0.9 : 1.0;
+    utterance.pitch = 1.0;
 
     utterance.onend = () => setPlayingIndex(null);
-    utterance.onerror = () => setPlayingIndex(null);
 
-    setPlayingIndex(index);
+    setPlayingIndex(idx);
     window.speechSynthesis.speak(utterance);
   };
 
@@ -313,43 +311,62 @@ export default function App() {
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-12 items-center relative z-10">
 
         {/* LEFT COLUMN: Hero / Info */}
-        <div className="flex lg:hidden flex-col gap-4 text-slate-800 mb-6 px-2">
+        {/* MOBILE LAYOUT (Visible on small screens) */}
+        <div className="flex lg:hidden flex-col gap-4 text-slate-800 mb-6 px-2 text-center items-center">
           <div>
-            <h1 className="text-6xl font-black tracking-tighter leading-[1.1] mb-4">
-              Navigate the world <br />
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm mb-4">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Live Demo</span>
+            </div>
+            <h1 className="text-4xl font-black tracking-tighter leading-[1.1] mb-4">
+              Your everyday<br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-sky-500">
-                At the Speed of Voice.
+                pocket concierge.
               </span>
             </h1>
-            <p className="text-lg text-slate-600 max-w-md leading-relaxed">
-              KAZE (風) is your intelligent companion. By fusing live weather data with generative AI, it turns your spoken words into adaptive, hyper-local itineraries instantly.
+            <p className="text-base text-slate-600 max-w-md leading-relaxed mx-auto">
+              Speak naturally, and KAZE (風) will handle the rest. By combining generative AI with live weather intelligence, it transforms a simple question into a tailored, weather-proof adventure.
+
+              {/* Japanese Translation */}
+              <div className="lg:hidden mt-6 mx-auto max-w-sm bg-white/60 p-4 rounded-xl border border-slate-200/60 backdrop-blur-sm text-left shadow-sm">
+                <span className="block font-bold text-[10px] uppercase tracking-widest mb-2 text-indigo-400">
+                  Japanese Translation
+                </span>
+                <p className="text-sm text-slate-700 leading-7 font-medium tracking-wide">
+                  あなたのポケットに、専属コンシェルジュを。<br />
+                  自然に話しかけるだけで、あとはKAZEにお任せ。生成AIとリアルタイム気象データを融合し、あなたの質問を天候に最適化された特別な体験へと変えます。
+                </p>
+              </div>
             </p>
           </div>
         </div>
 
-        <div className="hidden lg:flex flex-col gap-6 text-slate-800">
+        {/* DESKTOP LAYOUT (Visible on large screens) */}
+        <div className="hidden lg:flex flex-col gap-6 text-slate-800 text-left items-start">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm mb-4">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Live Demo</span>
             </div>
             <h1 className="text-6xl font-black tracking-tighter leading-[1.1] mb-4">
-              Navigate the world <br />
+              Your everyday<br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-sky-500">
-                At the Speed of Voice.
+                pocket concierge.
               </span>
             </h1>
             <p className="text-lg text-slate-600 max-w-md leading-relaxed">
-              KAZE (風) is your intelligent companion. By fusing live weather data with generative AI, it turns your spoken words into adaptive, hyper-local itineraries instantly.
-            </p>
-          </div>
+              Speak naturally, and KAZE (風) will handle the rest. By combining generative AI with live weather intelligence, it transforms a simple question into a tailored, weather-proof adventure.
 
-          <div className="flex flex-wrap gap-2">
-            {['React', 'Flask', 'Whisper AI', 'Llama 3', 'OpenWeather'].map(tech => (
-              <span key={tech} className="px-3 py-1.5 bg-white/60 border border-slate-200 rounded-lg text-xs font-bold text-slate-600">
-                {tech}
-              </span>
-            ))}
+              <div className="hidden lg:block mt-8 pl-5 border-l-2 border-indigo-100">
+                <span className="block font-bold text-[10px] uppercase tracking-widest mb-2 text-indigo-400">
+                  Japanese Translation
+                </span>
+                <p className="text-sm text-slate-600 leading-7 font-medium tracking-wide max-w-md">
+                  あなたのポケットに、専属コンシェルジュを。<br />
+                  自然に話しかけるだけで、あとはKAZEにお任せ。生成AIとリアルタイム気象データを融合し、あなたの質問を天候に最適化された特別な体験へと変えます。
+                </p>
+              </div>
+            </p>
           </div>
         </div>
 
@@ -358,7 +375,7 @@ export default function App() {
           <div className="w-full sm:max-w-md mx-auto h-[100dvh] sm:h-[800px] bg-white sm:rounded-[32px] shadow-2xl relative flex flex-col overflow-hidden ring-8 ring-white ring-opacity-40 backdrop-blur-xl">
 
             {/* Header */}
-            <header className="bg-white/80 backdrop-blur-xl border-b border-slate-200/60 p-4 flex justify-between items-center z-20 sticky top-0 shadow-sm">
+            <header className="bg-white/80 backdrop-blur-xl border-b border-slate-200/60 p-4 flex justify-between items-center z-20 sticky top-0 shadow-sm transition-all">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl flex items-center justify-center text-white shadow-lg shadow-slate-200 ring-1 ring-slate-900/5">
                   <Wind size={20} className="animate-pulse-slow" />
@@ -377,12 +394,23 @@ export default function App() {
               </div>
 
               <div className="flex flex-col items-end">
+                {/* Label with EN/JP */}
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 mr-1 opacity-80">
-                  Output Language
+                  Output Language / 出力言語
                 </span>
                 <div className="flex bg-slate-100/80 rounded-lg p-1 border border-slate-200">
-                  <button onClick={() => setTargetLang('English')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all duration-200 ${targetLang === 'English' ? 'bg-white shadow-sm text-slate-900 ring-1 ring-black/5' : 'text-slate-400 hover:text-slate-600'}`}>EN</button>
-                  <button onClick={() => setTargetLang('Japanese')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all duration-200 ${targetLang === 'Japanese' ? 'bg-white shadow-sm text-slate-900 ring-1 ring-black/5' : 'text-slate-400 hover:text-slate-600'}`}>JP</button>
+                  <button
+                    onClick={() => setTargetLang('English')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all duration-200 flex items-center gap-1 ${targetLang === 'English' ? 'bg-white shadow-sm text-slate-900 ring-1 ring-black/5' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                    EN <span className="text-[9px] font-normal opacity-70">英語</span>
+                  </button>
+                  <button
+                    onClick={() => setTargetLang('Japanese')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all duration-200 flex items-center gap-1 ${targetLang === 'Japanese' ? 'bg-white shadow-sm text-slate-900 ring-1 ring-black/5' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                    JP <span className="text-[9px] font-normal opacity-70">日本語</span>
+                  </button>
                 </div>
               </div>
             </header>
@@ -471,22 +499,24 @@ export default function App() {
                           <div className="flex items-center justify-between pt-4 border-t border-slate-50">
                             <button
                               onClick={() => {
-                                // Gather all meaningful text parts for TTS
-                                const contentParts = [
+                                // Combine Title + Report + Points for reading
+                                const fullText = [
                                   msg.data.title,
                                   msg.data.report,
                                   (msg.data.points || []).join('. ')
-                                ];
-                                const fullText = contentParts.filter(Boolean).join('. ');
+                                ].filter(Boolean).join('. ');
+
                                 toggleAudio(fullText, idx);
                               }}
-                              className={`p-2 rounded-full transition-colors ${playingIndex === idx
-                                ? 'bg-slate-900 text-white hover:bg-slate-800'
-                                : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'
-                                }`}
-                              title={playingIndex === idx ? "Stop Voice" : "Read Response"}
+                              className={`flex items-center gap-1.5 text-xs font-bold transition-colors hover:opacity-80 ${CATEGORY_THEMES[msg.data.category]?.text}`}
                             >
-                              {playingIndex === idx ? <Square size={12} fill="currentColor" /> : <Volume2 size={16} />}
+                              {/* Dynamic Icon: Square if playing this card, Speaker if idle */}
+                              {playingIndex === idx ? <StopCircle size={14} /> : <Volume2 size={14} />}
+
+                              {/* Dynamic Label */}
+                              {playingIndex === idx
+                                ? (targetLang === 'English' ? 'Stop' : '停止')
+                                : (targetLang === 'English' ? 'Listen' : '聞く')}
                             </button>
 
                             {!msg.isWelcome && (
