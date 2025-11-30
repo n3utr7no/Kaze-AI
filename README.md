@@ -2,6 +2,8 @@
 
 This repository contains the source code for **KAZE AI**, a context-aware voice concierge that combines ultra-fast generative AI with live weather intelligence to transform simple spoken requests into actionable, weather-proof itineraries.
 
+**Live Link** - https://kaze-ai.vercel.app/
+
 -----
 
 ## 🛠 Tech Stack
@@ -178,5 +180,26 @@ The project is designed with a clear separation between the Client (Presentation
   - **Rate Limiting:**
       - Relies on the free tier of Groq and OpenWeatherMap, which restricts the number of concurrent requests per minute.
 
+-----
 
-**Live Link** - https://kaze-ai.vercel.app/
+## Key Features
+
+### Voice-First & Multilingual
+
+KAZE AI is designed for natural conversation.
+* **High-Fidelity Transcription:** Uses **Groq's Whisper-large-v3** to capture Japanese phonetics with near-perfect accuracy, even in fast-paced speech.
+* **Browser-Agnostic:** The frontend intelligently handles audio encoding (WebM for Chrome, MP4 for Safari) to ensure compatibility across devices.
+* **Auto-Translation:** Seamlessly translates user intent between Japanese and English for internal logic processing, then translates the result back for the user.
+
+### Weather-Adaptive Reasoning (RAG)
+
+Unlike standard LLMs that cannot see the real world, KAZE AI "looks out the window" before answering.
+* **Agentic Tool Use:** The system pauses execution to query the **OpenWeatherMap 5-Day Forecast API** for the specific location and time requested.
+* **Contextual Planning:** Weather data is injected into the system prompt. If it detects rain, the AI automatically pivots suggestions to indoor activities (e.g., museums, cafes) without being explicitly asked.
+
+### Dynamic & Reactive UI
+
+The interface is a "State Machine" that provides constant visual feedback.
+* **Context-Aware Theming:** The UI color palette and iconography shift dynamically based on the active category (Travel = Sky Blue, Fashion = Pink, Agriculture = Green).
+* **Glassmorphic Design:** Built with **TailwindCSS** and **Framer Motion** for fluid animations, loading states, and chat bubble transitions.
+* **Smart Text-to-Speech:** Features an auto-detecting TTS engine that switches languages (Japanese/English) based on the content of the specific itinerary card.
