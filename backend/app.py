@@ -142,16 +142,16 @@ def transcribe():
 @app.route('/generate_plan', methods=['POST'])
 def generate_plan():
     try:
-        # 1. INPUT VALIDATION
+        # 1. INPUT VALIDATION (Preserved)
         try:
             req_data = PlanRequest(**request.json)
         except ValidationError as e:
             return jsonify({"error": "Invalid Input Schema", "details": e.errors()}), 400
 
-        # 2. SANITIZATION
+        # 2. SANITIZATION (Preserved)
         user_text = sanitize_input(req_data.text)
         
-        # 3. PHASE 1: ANALYSIS
+        # 3. PHASE 1: ANALYSIS (Preserved)
         analysis_messages = [{"role": "system", "content": """
             You are a data extractor.
             1. Extract 'city' (English). If user says 'here'/'my location', set 'CURRENT_LOCATION'. Default 'Tokyo'.
@@ -174,17 +174,15 @@ def generate_plan():
         user_translation = analysis.get("translation", "")
         if not user_translation or user_translation == user_text: user_translation = ""
 
-        # 4. PHASE 2: WEATHER FETCH
+        # 4. PHASE 2: WEATHER FETCH (Preserved)
         if target_city == "CURRENT_LOCATION" and req_data.user_location:
             weather_data = get_weather_forecast(None, analysis.get("day_offset", 0), coords=req_data.user_location)
             target_city = weather_data['city_name']
         else:
             weather_data = get_weather_forecast(target_city, analysis.get("day_offset", 0))
 
-        # 5. PHASE 3: PLANNING 
-        lang_instruction = "ENGLISH" if req_data.language == 'English' else "JAPANESE (日本語)"
-        time_example = "Morning / 9:00 AM" if req_data.language == 'English' else "朝 / 9:00"
-
+        # 5. PHASE 3: PLANNING (Updated for Bilingual Output)
+        
         system_prompt = f"""
         ### ROLE
         You are a world-class local concierge specializing in {req_data.category}.
@@ -193,7 +191,7 @@ def generate_plan():
         ### CONTEXT
         - Location: {target_city} (Date: {weather_data['date']})
         - Weather: {weather_data['cond']} ({weather_data['temp']}°C)
-        - Target Language: {lang_instruction}
+        - Target Languages: English and Japanese (Bilingual Output)
 
         ### LOGIC TREE
         1. **ANALYZE INTENT**:
@@ -202,7 +200,7 @@ def generate_plan():
 
         2. **EXECUTE MODE**:
            - **GREETING MODE**:
-             - Intro: A warm, polite welcome back in {lang_instruction}.
+             - Intro: A warm, polite welcome back.
              - Title: "Welcome" or similar greeting.
              - Timeline: 3 suggested questions the user can ask next (e.g., "Ask about Sushi in Ginza").
            
@@ -214,18 +212,30 @@ def generate_plan():
              - Emojis: No emojis are to be used anywhere.
 
         3. **FORMATTING**:
-           - Output strictly in **{lang_instruction}**.
            - Return raw JSON only.
+           - Generate content for BOTH keys: "en" and "ja".
 
         ### OUTPUT JSON SCHEMA
         {{
             "mode": "greeting" or "itinerary",
-            "intro": "Conversational opening sentence",
-            "weather_report": "Specific forecast (or null if greeting)",
-            "title": "Short title",
-            "timeline": [
-                {{ "time": "Time (Ex: '{time_example}')", "activity": "Specific Activity Name", "description": "Why this fits the weather/vibe" }}
-            ]
+            "content": {{
+                "en": {{
+                    "intro": "Conversational opening in English",
+                    "weather_report": "Specific forecast in English (or null)",
+                    "title": "Short title in English",
+                    "timeline": [
+                        {{ "time": "Time (e.g. 9:00 AM)", "activity": "Activity Name", "description": "Details" }}
+                    ]
+                }},
+                "ja": {{
+                    "intro": "Conversational opening in Japanese",
+                    "weather_report": "Specific forecast in Japanese (or null)",
+                    "title": "Short title in Japanese",
+                    "timeline": [
+                        {{ "time": "Time (e.g. 9:00)", "activity": "Activity Name", "description": "Details" }}
+                    ]
+                }}
+            }}
         }}
         """
         
@@ -236,27 +246,42 @@ def generate_plan():
 
         plan_res = call_llm(plan_messages, response_format={"type": "json_object"})
         plan_data = json.loads(plan_res.choices[0].message.content)
+        
+        # Helper to format points safely
+        def format_points(timeline):
+            points = []
+            for item in timeline:
+                time = item.get("time", "").strip()
+                activity = item.get("activity", "")
+                desc = item.get("description", "")
+                if time and time.lower() not in ["null", "none", ""]:
+                    points.append(f"{time}: {activity} - {desc}")
+                else:
+                    points.append(f"{activity} - {desc}")
+            return points
 
-        formatted_points = []
-        for item in plan_data.get("timeline", []):
-            time = item.get("time", "").strip()
-            activity = item.get("activity", "")
-            desc = item.get("description", "")
-            
-            if time and time.lower() not in ["null", "none", ""]:
-                formatted_points.append(f"{time}: {activity} - {desc}")
-            else:
-                formatted_points.append(f"{activity} - {desc}")
-
+        content = plan_data.get("content", {})
+        
+        # Normalize output for frontend
         return jsonify({
             "city": target_city, 
             "weather": weather_data,
-            "intro": plan_data.get("intro", ""), 
-            "report": plan_data.get("weather_report", ""),
-            "title": plan_data.get("title", "Suggestion"),
-            "points": formatted_points,
             "category": req_data.category,
-            "user_translation": user_translation
+            "user_translation": user_translation,
+            "content": {
+                "en": {
+                    "intro": content.get("en", {}).get("intro", ""),
+                    "report": content.get("en", {}).get("weather_report", ""),
+                    "title": content.get("en", {}).get("title", ""),
+                    "points": format_points(content.get("en", {}).get("timeline", []))
+                },
+                "ja": {
+                    "intro": content.get("ja", {}).get("intro", ""),
+                    "report": content.get("ja", {}).get("weather_report", ""),
+                    "title": content.get("ja", {}).get("title", ""),
+                    "points": format_points(content.get("ja", {}).get("timeline", []))
+                }
+            }
         })
 
     except ValueError as ve:

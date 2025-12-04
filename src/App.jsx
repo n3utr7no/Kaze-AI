@@ -3,7 +3,7 @@ import axios from 'axios';
 import {
   Mic, RefreshCw, ExternalLink, Languages, Sparkles, Send,
   Plane, Shirt, Music, Sprout, Trophy, Globe, Wind, Info,
-  Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Volume2, Square, StopCircle
+  Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Volume2, StopCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -55,16 +55,24 @@ export default function App() {
     {
       type: 'bot',
       isWelcome: true,
+      displayLang: 'English', // Tracks language for this specific card
       data: {
-        title: "Welcome to KAZE AI",
-        city: "System",
-        weather: { temp: "--", icon_code: "" },
         category: "General",
-        points: [
-          "Select a category below",
-          "Tap the Mic to speak",
-          "Or type your question directly"
-        ]
+        weather: { temp: "--", icon_code: "" },
+        city: "System",
+        // Structure content for both languages
+        content: {
+          en: {
+            title: "Welcome to KAZE AI",
+            report: "I am ready to help.",
+            points: ["Select a category below", "Tap the Mic to speak", "Or type your question directly"]
+          },
+          ja: {
+            title: "KAZE AIへようこそ",
+            report: "準備完了しました。",
+            points: ["下のカテゴリーを選択してください", "マイクをタップして話す", "または直接入力してください"]
+          }
+        }
       }
     }
   ]);
@@ -85,7 +93,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatHistory.length > 1) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [chatHistory, appState]);
 
   // Update Welcome message when language toggles
@@ -108,6 +118,7 @@ export default function App() {
       return newHistory;
     });
   }, [targetLang]);
+
 
   // --- Audio Recording & Processing ---
 
@@ -188,7 +199,23 @@ export default function App() {
 
   // --- Text-to-Speech ---
 
-  const toggleAudio = (text, idx) => {
+  // NEW: Helper to toggle language on a specific card
+  const toggleCardLanguage = (index) => {
+    setChatHistory(prev => {
+      const newHistory = [...prev];
+      const msg = newHistory[index];
+      if (msg.type === 'bot') {
+        newHistory[index] = {
+          ...msg,
+          displayLang: msg.displayLang === 'English' ? 'Japanese' : 'English'
+        };
+      }
+      return newHistory;
+    });
+  };
+
+  // UPDATED: Accepts 'lang' argument to speak the correct language per card
+  const toggleAudio = (text, lang, idx) => {
     window.speechSynthesis.cancel();
 
     if (playingIndex === idx) {
@@ -197,10 +224,10 @@ export default function App() {
     }
 
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = targetLang === 'English' ? 'en-US' : 'ja-JP';
+    // Use the specific card's language, not the global targetLang
+    utterance.lang = lang === 'English' ? 'en-US' : 'ja-JP';
 
-    // Slow down slightly for Japanese to be clearer
-    utterance.rate = targetLang === 'Japanese' ? 0.9 : 1.0;
+    utterance.rate = lang === 'Japanese' ? 0.9 : 1.0;
     utterance.pitch = 1.0;
 
     utterance.onend = () => setPlayingIndex(null);
@@ -249,16 +276,15 @@ export default function App() {
         });
       }
 
+      // UPDATED: Store the bilingual content structure
       const botMsg = {
         type: 'bot',
+        displayLang: targetLang, // Initialize with current global preference
         data: {
           city: data.city,
           weather: data.weather,
-          intro: data.intro,
-          report: data.report,
-          title: data.title,
-          points: data.points,
-          category: data.category
+          category: data.category,
+          content: data.content // Expecting { en: {...}, ja: {...} } from backend
         }
       };
 
@@ -305,38 +331,44 @@ export default function App() {
     <div className="min-h-screen w-full bg-[#f3f4f6] relative overflow-hidden font-sans selection:bg-indigo-500 selection:text-white flex items-center justify-center p-4 sm:p-8">
 
       {/* Background Blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
       <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-sky-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
 
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-12 items-center relative z-10">
 
-        {/* LEFT COLUMN: Hero / Info */}
-        {/* MOBILE LAYOUT (Visible on small screens) */}
+        {/* MOBILE LAYOUT */}
         <div className="flex lg:hidden flex-col gap-4 text-slate-800 mb-6 px-2 text-center items-center">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm mb-4">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Live Demo</span>
+              {/* Fixed Text Size: text-[10px] */}
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Live Demo</span>
             </div>
-            <h1 className="text-4xl font-black tracking-tighter leading-[1.1] mb-4">
-              Your everyday<br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-sky-500">
-                pocket concierge.
-              </span>
-            </h1>
-            <p className="text-base text-slate-600 max-w-md leading-relaxed mx-auto">
-              Speak naturally, and KAZE (風) will handle the rest. By combining generative AI with live weather intelligence, it transforms a simple question into a tailored, weather-proof adventure.
 
-              {/* Japanese Translation */}
-              <div className="lg:hidden mt-6 mx-auto max-w-sm bg-white/60 p-4 rounded-xl border border-slate-200/60 backdrop-blur-sm text-left shadow-sm">
-                <span className="block font-bold text-[10px] uppercase tracking-widest mb-2 text-indigo-400">
-                  Japanese Translation
-                </span>
-                <p className="text-sm text-slate-700 leading-7 font-medium tracking-wide">
-                  あなたのポケットに、専属コンシェルジュを。<br />
-                  自然に話しかけるだけで、あとはKAZEにお任せ。生成AIとリアルタイム気象データを融合し、あなたの質問を天候に最適化された特別な体験へと変えます。
-                </p>
-              </div>
+            {/* Fixed Text Size: text-4xl */}
+            <h1 className="text-4xl font-black tracking-tighter leading-[1.1] mb-4">
+              {targetLang === 'English' ? (
+                <>
+                  Your everyday<br />
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-sky-500">
+                    pocket concierge.
+                  </span>
+                </>
+              ) : (
+                <>
+                  あなたのポケットに、<br />
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-sky-500">
+                    専属コンシェルジュを。
+                  </span>
+                </>
+              )}
+            </h1>
+
+            {/* Fixed Text Size: text-base */}
+            <p className="text-base text-slate-600 max-w-md leading-relaxed mx-auto">
+              {targetLang === 'English'
+                ? "Speak naturally, and KAZE (風) will handle the rest. By combining generative AI with live weather intelligence, it transforms a simple question into a tailored, weather-proof adventure."
+                : "自然に話しかけるだけで、あとはKAZEにお任せ。生成AIとリアルタイム気象データを融合し、あなたの質問を天候に最適化された特別な体験へと変えます。"
+              }
             </p>
           </div>
         </div>
@@ -346,26 +378,35 @@ export default function App() {
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm mb-4">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Live Demo</span>
+              {/* Fixed Text Size: text-[10px] */}
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Live Demo</span>
             </div>
-            <h1 className="text-6xl font-black tracking-tighter leading-[1.1] mb-4">
-              Your everyday<br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-sky-500">
-                pocket concierge.
-              </span>
-            </h1>
-            <p className="text-lg text-slate-600 max-w-md leading-relaxed">
-              Speak naturally, and KAZE (風) will handle the rest. By combining generative AI with live weather intelligence, it transforms a simple question into a tailored, weather-proof adventure.
 
-              <div className="hidden lg:block mt-8 pl-5 border-l-2 border-indigo-100">
-                <span className="block font-bold text-[10px] uppercase tracking-widest mb-2 text-indigo-400">
-                  Japanese Translation
-                </span>
-                <p className="text-sm text-slate-600 leading-7 font-medium tracking-wide max-w-md">
-                  あなたのポケットに、専属コンシェルジュを。<br />
-                  自然に話しかけるだけで、あとはKAZEにお任せ。生成AIとリアルタイム気象データを融合し、あなたの質問を天候に最適化された特別な体験へと変えます。
-                </p>
-              </div>
+            {/* Fixed Text Size: text-6xl */}
+            <h1 className="text-6xl font-black tracking-tighter leading-[1.1] mb54">
+              {targetLang === 'English' ? (
+                <>
+                  Your everyday<br />
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-sky-500">
+                    pocket concierge.
+                  </span>
+                </>
+              ) : (
+                <>
+                  あなたのポケットに、<br />
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-sky-500">
+                    専属コンシェルジュを。
+                  </span>
+                </>
+              )}
+            </h1>
+
+            {/* Fixed Text Size: text-lg */}
+            <p className="text-lg text-slate-600 max-w-md leading-relaxed">
+              {targetLang === 'English'
+                ? "Speak naturally, and KAZE (風) will handle the rest. By combining generative AI with live weather intelligence, it transforms a simple question into a tailored, weather-proof adventure."
+                : "自然に話しかけるだけで、あとはKAZEにお任せ。生成AIとリアルタイム気象データを融合し、あなたの質問を天候に最適化された特別な体験へと変えます。"
+              }
             </p>
           </div>
         </div>
@@ -394,10 +435,11 @@ export default function App() {
               </div>
 
               <div className="flex flex-col items-end">
-                {/* Label with EN/JP */}
+                {/* UPDATED LABEL */}
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 mr-1 opacity-80">
-                  Output Language / 出力言語
+                  Language / 言語
                 </span>
+
                 <div className="flex bg-slate-100/80 rounded-lg p-1 border border-slate-200">
                   <button
                     onClick={() => setTargetLang('English')}
@@ -418,10 +460,10 @@ export default function App() {
             {/* Chat Stream */}
             <main
               className={`
-              flex-1 overflow-y-auto p-4 space-y-6 scrollbar-hide relative z-10 bg-slate-50/50 flex flex-col justify-start pb-56
+              flex-1 overflow-y-auto px-4 pt-5 space-y-6 scrollbar-hide relative z-10 bg-slate-50/50 flex flex-col justify-start pb-56
               ${isWelcome
-                  ? 'flex items-center justify-center pb-0 mb-48'
-                  : 'flex flex-col justify-start items-center pb-56'
+                  ? 'items-center'
+                  : 'items-center'
                 }`}>
               <AnimatePresence mode="popLayout">
                 {chatHistory.map((msg, idx) => (
@@ -431,105 +473,119 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     className={`flex w-full ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
-                    {/* User Message Bubble */}
+                    {/* User Message Bubble (Unchanged) */}
                     {msg.type === 'user' && (
                       <div className="flex flex-col items-end max-w-[80%]">
                         <div className="bg-slate-800 text-white px-5 py-3 rounded-2xl rounded-tr-none shadow-md text-sm md:text-base">
                           {msg.main}
                         </div>
-                        {msg.sub && (
-                          <span className="text-[10px] text-slate-400 mt-1 mr-1 italic">{msg.sub}</span>
-                        )}
+                        {msg.sub && <span className="text-[10px] text-slate-400 mt-1 mr-1 italic">{msg.sub}</span>}
                       </div>
                     )}
 
-                    {/* Bot/Response Card */}
+                    {/* UPDATED: Bot/Response Card */}
                     {msg.type === 'bot' && (
                       <div className={`w-full ${msg.isWelcome ? 'max-w-[85%]' : 'max-w-[85%] mr-auto'}`}>
-                        <div className="bg-white rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] ring-1 ring-slate-100 relative overflow-hidden">
+                        <div className="bg-white rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] ring-1 ring-slate-100 relative overflow-hidden group">
 
                           <div className={`absolute top-0 left-0 w-full h-1.5 ${CATEGORY_THEMES[msg.data.category]?.solid || 'bg-slate-200'}`} />
 
-                          {/* Card Header & Weather Badge */}
-                          <div className="flex justify-between items-start gap-4 mb-4">
-                            <div className="flex-1">
-                              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider mb-2 ${CATEGORY_THEMES[msg.data.category]?.bg} ${CATEGORY_THEMES[msg.data.category]?.text}`}>
-                                <Sparkles size={10} />
-                                {CATEGORIES.find(c => c.id === msg.data.category)
-                                  ? (targetLang === 'English' ? CATEGORIES.find(c => c.id === msg.data.category).label : CATEGORIES.find(c => c.id === msg.data.category).ja)
-                                  : msg.data.category}
-                              </div>
-                              <h2 className="text-xl font-bold text-slate-900 leading-tight">{msg.data.title}</h2>
-                            </div>
+                          {/* DYNAMIC CONTENT SELECTOR */}
+                          {(() => {
+                            // Determine which content to show based on card state
+                            const langKey = msg.displayLang === 'English' ? 'en' : 'ja';
+                            const content = msg.data.content[langKey];
+                            // Label for the toggle button (show the OPPOSITE language)
+                            const toggleLabel = msg.displayLang === 'English' ? '日本語' : 'English';
 
-                            {!msg.isWelcome && (
-                              <div className="flex flex-col items-center justify-center bg-slate-50/80 backdrop-blur-sm rounded-2xl p-2.5 min-w-[70px] border border-slate-100">
-                                <div className={CATEGORY_THEMES[msg.data.category]?.text}>
-                                  {getWeatherIcon(msg.data.weather.icon_code)}
+                            return (
+                              <>
+                                {/* Card Header */}
+                                <div className="flex justify-between items-start gap-4 mb-4">
+                                  <div className="flex-1">
+                                    <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider mb-2 ${CATEGORY_THEMES[msg.data.category]?.bg} ${CATEGORY_THEMES[msg.data.category]?.text}`}>
+                                      <Sparkles size={10} />
+                                      {CATEGORIES.find(c => c.id === msg.data.category)
+                                        ? (msg.displayLang === 'English' ? CATEGORIES.find(c => c.id === msg.data.category).label : CATEGORIES.find(c => c.id === msg.data.category).ja)
+                                        : msg.data.category}
+                                    </div>
+                                    <h2 className="text-xl font-bold text-slate-900 leading-tight">{content.title}</h2>
+                                  </div>
+
+                                  {!msg.isWelcome && (
+                                    <div className="flex flex-col items-center justify-center bg-slate-50/80 backdrop-blur-sm rounded-2xl p-2.5 min-w-[70px] border border-slate-100">
+                                      <div className={CATEGORY_THEMES[msg.data.category]?.text}>
+                                        {getWeatherIcon(msg.data.weather.icon_code)}
+                                      </div>
+                                      <div className="text-lg font-bold text-slate-700 mt-1 leading-none">{msg.data.weather.temp}°</div>
+                                      <div className="text-[9px] font-bold text-slate-400 uppercase mt-0.5 tracking-wide">{msg.data.city}</div>
+                                    </div>
+                                  )}
                                 </div>
-                                <div className="text-lg font-bold text-slate-700 mt-1 leading-none">{msg.data.weather.temp}°</div>
-                                <div className="text-[9px] font-bold text-slate-400 uppercase mt-0.5 tracking-wide">{msg.data.city}</div>
-                              </div>
-                            )}
-                          </div>
 
-                          {/* Report Summary */}
-                          {msg.data.report && (
-                            <div className="mb-5 bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex gap-3 items-start">
-                              <div className={`mt-0.5 ${CATEGORY_THEMES[msg.data.category]?.text}`}>
-                                <Info size={16} />
-                              </div>
-                              <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                                {msg.data.report}
-                              </p>
-                            </div>
-                          )}
+                                {/* Report Summary */}
+                                {content.report && (
+                                  <div className="mb-5 bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex gap-3 items-start">
+                                    <div className={`mt-0.5 ${CATEGORY_THEMES[msg.data.category]?.text}`}>
+                                      <Info size={16} />
+                                    </div>
+                                    <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                                      {content.report}
+                                    </p>
+                                  </div>
+                                )}
 
-                          {/* Points List */}
-                          <ul className="space-y-3 mb-5">
-                            {msg.data.points.map((p, i) => (
-                              <li key={i} className="flex items-start gap-3 text-sm text-slate-600 leading-relaxed group">
-                                <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${CATEGORY_THEMES[msg.data.category]?.solid} opacity-60 group-hover:opacity-100`}></span>
-                                {p}
-                              </li>
-                            ))}
-                          </ul>
+                                {/* Points List */}
+                                <ul className="space-y-3 mb-5">
+                                  {content.points.map((p, i) => (
+                                    <li key={i} className="flex items-start gap-3 text-sm text-slate-600 leading-relaxed group">
+                                      <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${CATEGORY_THEMES[msg.data.category]?.solid} opacity-60 group-hover:opacity-100`}></span>
+                                      {p}
+                                    </li>
+                                  ))}
+                                </ul>
 
-                          {/* Card Footer */}
-                          <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                            <button
-                              onClick={() => {
-                                // Combine Title + Report + Points for reading
-                                const fullText = [
-                                  msg.data.title,
-                                  msg.data.report,
-                                  (msg.data.points || []).join('. ')
-                                ].filter(Boolean).join('. ');
+                                {/* Card Footer Actions */}
+                                <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                                  <div className="flex gap-2">
+                                    {/* AUDIO TOGGLE */}
+                                    <button
+                                      onClick={() => {
+                                        const fullText = [content.title, content.report, (content.points || []).join('. ')].filter(Boolean).join('. ');
+                                        toggleAudio(fullText, msg.displayLang, idx);
+                                      }}
+                                      className={`flex items-center gap-1.5 text-xs font-bold transition-colors ${playingIndex === idx ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                      {playingIndex === idx ? <StopCircle size={14} /> : <Volume2 size={14} />}
+                                      {playingIndex === idx
+                                        ? (msg.displayLang === 'English' ? 'Stop' : '停止')
+                                        : (msg.displayLang === 'English' ? 'Listen' : '聞く')}
+                                    </button>
 
-                                toggleAudio(fullText, idx);
-                              }}
-                              className={`flex items-center gap-1.5 text-xs font-bold transition-colors hover:opacity-80 ${CATEGORY_THEMES[msg.data.category]?.text}`}
-                            >
-                              {/* Dynamic Icon: Square if playing this card, Speaker if idle */}
-                              {playingIndex === idx ? <StopCircle size={14} /> : <Volume2 size={14} />}
+                                    {/* NEW: LANGUAGE TOGGLE BUTTON */}
+                                    <button
+                                      onClick={() => toggleCardLanguage(idx)}
+                                      className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors ml-2"
+                                    >
+                                      <RefreshCw size={12} />
+                                      {toggleLabel}
+                                    </button>
+                                  </div>
 
-                              {/* Dynamic Label */}
-                              {playingIndex === idx
-                                ? (targetLang === 'English' ? 'Stop' : '停止')
-                                : (targetLang === 'English' ? 'Listen' : '聞く')}
-                            </button>
-
-                            {!msg.isWelcome && (
-                              <a
-                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(msg.data.city + ' ' + msg.data.title)}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className={`inline-flex items-center gap-1.5 text-xs font-bold transition-colors hover:opacity-80 ${CATEGORY_THEMES[msg.data.category]?.text}`}
-                              >
-                                {targetLang === 'English' ? 'Open Map' : '地図を開く'} <ExternalLink size={12} />
-                              </a>
-                            )}
-                          </div>
+                                  {!msg.isWelcome && (
+                                    <a
+                                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(msg.data.city + ' ' + content.title)}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className={`inline-flex items-center gap-1.5 text-xs font-bold transition-colors hover:opacity-80 ${CATEGORY_THEMES[msg.data.category]?.text}`}
+                                    >
+                                      {msg.displayLang === 'English' ? 'Open Map' : '地図を開く'} <ExternalLink size={12} />
+                                    </a>
+                                  )}
+                                </div>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     )}
