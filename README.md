@@ -2,7 +2,7 @@
 
 This repository contains the source code for **KAZE AI**, a context-aware voice concierge that combines ultra-fast generative AI with live weather intelligence to transform simple spoken requests into actionable, weather-proof itineraries.
 
-**Live Link** - https://kaze-ai.vercel.app/
+**Live Link** – https://kaze-ai.vercel.app/
 
 -----
 
@@ -12,7 +12,7 @@ This repository contains the source code for **KAZE AI**, a context-aware voice 
 
 - **Groq SDK** – Whisper STT + Llama 3 inference with ultra-low latency on LPUs  
 - **Tenacity** – Retry + exponential backoff  
-- **Pydantic** – Strict validation for LLM JSON outputs  
+- **Pydantic** – Strict validation for **API inputs**  
 - **Flask-CORS** – Secure cross-origin communication  
 
 ### Frontend: React (Vite)
@@ -123,9 +123,9 @@ The frontend auto-detects format and packages it, and the backend streams it to 
 
 1. **Intent Extraction** – Extract target city + date offset  
 2. **Tool Use** – Weather query via OpenWeatherMap  
-3. **Context Injection** – Weather is injected into the system prompt before final planning  
+3. **Context Injection** – Weather is injected into the final system prompt  
 
-This prevents hallucinations and ensures physically possible itineraries.
+This ensures the itinerary is physically accurate and weather-aware.
 
 ![Sequence Diagram](sequence-diag.png)
 
@@ -134,8 +134,27 @@ This prevents hallucinations and ensures physically possible itineraries.
 ### 3. Stateless Security & Validation
 
 - **Semantic Sanitizer** – Blocks prompt injection attempts  
-- **Pydantic Schema Enforcement** – Ensures deterministic JSON responses  
-- Prevents UI breakage from malformed outputs  
+- **Pydantic Input Validation** – Ensures only structurally valid API inputs reach the pipeline  
+- Prevents UI breakage and maintains safety  
+
+-----
+
+### 4. Voice-First & Multilingual
+
+- Japanese/English voice comprehension  
+- Whisper-large-v3 transcription  
+- Automatic EN ↔ JA translation pipeline  
+
+### 5. Weather-Adaptive Reasoning (RAG)
+
+- Automatically fetches real weather  
+- Switches between indoor/outdoor options depending on conditions  
+
+### 6. Dynamic & Reactive UI
+
+- Category-theming for Travel, Fashion, Music, Agriculture, etc.  
+- Smooth glassmorphic interface powered by Framer Motion  
+- Smart bilingual TTS engine  
 
 -----
 
@@ -145,14 +164,14 @@ This prevents hallucinations and ensures physically possible itineraries.
 
 - `App.jsx` – State machine for **idle → recording → transcribing → planning**  
 - `components/` – UI cards + reusable widgets  
-- `assets/` – Images + icons  
+- `assets/` – Static images + icons  
 
 ### Backend (`app.py`)
 
 - Flask API gateway  
 - `call_llm()` – Groq wrapper with retry logic  
-- `get_weather_forecast()` – External weather tool  
-- `generate_plan()` – Orchestrator that binds NLU + tools + generation  
+- `get_weather_forecast()` – External weather retrieval  
+- `generate_plan()` – Orchestrates NLU + tools + generation  
 
 -----
 
@@ -160,59 +179,38 @@ This prevents hallucinations and ensures physically possible itineraries.
 
 ### Assumptions
 
-- Users allow geolocation (fallback = Tokyo)  
-- "One-shot" planning optimized for current prompt  
+- Geolocation allowed (fallback: Tokyo)  
+- "One-shot" planning per request  
 - Quiet environments improve STT accuracy  
 
 ### Limitations
 
-- Browser reload previously cleared session context (fixed in v2)  
-- Complex temporal queries may still fail  
-- API rate limits from OpenWeatherMap + Groq  
-
------
-
-## Key Features
-
-### Voice-First & Multilingual
-
-- Japanese/English voice comprehension  
-- Whisper-large-v3 transcription  
-- Auto-translation pipeline  
-
-### Weather-Adaptive Reasoning (RAG)
-
-- Pauses execution to fetch real weather  
-- Dynamically adjusts itinerary (indoor/outdoor)  
-
-### Dynamic UI
-
-- Automatic theme switching by category  
-- Smooth glassmorphic animations  
-- Smart bilingual TTS  
+- Historical context was previously ephemeral (resolved in v2 via Firestore)  
+- Complex date expressions may require multiple fallback attempts  
+- API rate limits (Groq + OpenWeatherMap)  
 
 -----
 
 ## New Features (v2)
 
 ### Persistent History (Firebase)
-- Firestore stores full chat history in real time  
-- Anonymous Auth = frictionless, private sessions  
+- Firestore stores full chat history per user session  
+- Anonymous Auth ensures privacy without onboarding friction  
 
 ### Interactive Maps (Leaflet)
-- Each itinerary card contains an embedded map  
-- Pins recommended locations on OpenStreetMap  
+- Locations in the itinerary are plotted dynamically  
+- Uses OpenStreetMap tiles for high-performance rendering  
 
 ### Audio Visualization
-- Web Audio API renders real-time frequency bars  
-- Lightweight and optimized for mobile  
+- Web Audio API renders lightweight real-time frequency bars  
+- Designed for smooth performance on mobile  
 
 ### Safety Guardrails
-- Semantic Router filters out  
+- Semantic Router filters out:
   - coding queries  
   - math  
-  - harmful / sensitive topics  
-- Only concierge-relevant queries proceed  
+  - harmful or sensitive topics  
+- Only valid concierge-domain queries proceed  
 
 ### Bilingual Toggle
 - One-click switch: **English ↔ Japanese**  
