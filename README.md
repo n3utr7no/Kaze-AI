@@ -100,7 +100,7 @@ http://localhost:5173
 
 -----
 
-## Architecture
+## 🔧 Architecture
 
 ### High-Level Context-Aware Pipeline
 
@@ -108,7 +108,7 @@ http://localhost:5173
 
 -----
 
-## Key Features
+## ✨ Key Features
 
 ### 1. Browser-Agnostic Audio Ingestion
 
@@ -137,8 +137,6 @@ This ensures the itinerary is physically accurate and weather-aware.
 - **Pydantic Input Validation** – Ensures only structurally valid API inputs reach the pipeline  
 - Prevents UI breakage and maintains safety  
 
------
-
 ### 4. Voice-First & Multilingual
 
 - Japanese/English voice comprehension  
@@ -158,40 +156,7 @@ This ensures the itinerary is physically accurate and weather-aware.
 
 -----
 
-## Project Structure
-
-### Frontend (`src/`)
-
-- `App.jsx` – State machine for **idle → recording → transcribing → planning**  
-- `components/` – UI cards + reusable widgets  
-- `assets/` – Static images + icons  
-
-### Backend (`app.py`)
-
-- Flask API gateway  
-- `call_llm()` – Groq wrapper with retry logic  
-- `get_weather_forecast()` – External weather retrieval  
-- `generate_plan()` – Orchestrates NLU + tools + generation  
-
------
-
-## Assumptions & Limitations
-
-### Assumptions
-
-- Geolocation allowed (fallback: Tokyo)  
-- "One-shot" planning per request  
-- Quiet environments improve STT accuracy  
-
-### Limitations
-
-- Historical context was previously ephemeral (resolved in v2 via Firestore)  
-- Complex date expressions may require multiple fallback attempts  
-- API rate limits (Groq + OpenWeatherMap)  
-
------
-
-## New Features (v2)
+## 🚀 New Features (v2)
 
 ### Persistent History (Firebase)
 - Firestore stores full chat history per user session  
@@ -215,4 +180,40 @@ This ensures the itinerary is physically accurate and weather-aware.
 ### Bilingual Toggle
 - One-click switch: **English ↔ Japanese**  
 - UI + generated outputs update instantly  
+
+---
+
+## 📂 Project Structure
+
+### Frontend (`src/`)
+
+- `App.jsx` – State machine for **idle → recording → transcribing → planning**  
+- `components/` – UI cards + reusable widgets  
+- `assets/` – Static images + icons  
+
+### Backend (`app.py`)
+
+- Flask API gateway  
+- `call_llm()` – Groq wrapper with retry logic  
+- `get_weather_forecast()` – External weather retrieval  
+- `generate_plan()` – Orchestrates NLU + tools + generation  
+
+-----
+
+## ⚠️ Assumptions & Limitations
+
+### Assumptions
+
+- Geolocation allowed (fallback: Tokyo)  
+- "One-shot" planning per request  
+- Quiet environments improve STT accuracy  
+
+### Limitations
+
+- Historical context was previously ephemeral (resolved in v2 via Firestore)  
+- Complex date expressions may require multiple fallback attempts  
+- API rate limits (Groq + OpenWeatherMap)  
+
+-----
+
 
