@@ -10,8 +10,9 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
 from typing import List, Optional, Dict, Any
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import re
 
-# 1. SETUP
+# --- 1. SETUP & CONFIGURATION ---
 load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -20,7 +21,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 client = Groq(api_key=GROQ_API_KEY)
 
-# 2. VALIDATION MODELS
+# --- 2. VALIDATION MODELS ---
 class PlanRequest(BaseModel):
     text: str = Field(..., min_length=1, description="User input text")
     category: str = "Travel"
@@ -28,34 +29,42 @@ class PlanRequest(BaseModel):
     history: List[Dict[str, Any]] = []
     user_location: Optional[Dict[str, float]] = None
 
-# 3. HELPER FUNCTIONS
+# --- 3. HELPER FUNCTIONS ---
 
 @retry(
     stop=stop_after_attempt(3), 
     wait=wait_exponential(multiplier=1, min=1, max=10),
     retry=retry_if_exception_type(Exception)
 )
-def call_llm(messages, response_format=None):
-    """Wrapper for Groq API call with automatic retries."""
+def call_llm(messages, response_format=None, model="llama-3.3-70b-versatile"):
+    """
+    Wrapper for Groq API call with automatic retries.
+    Defaults to 70B model, but allows overriding for speed.
+    """
     return client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=model,
         messages=messages,
         response_format=response_format
     )
 
 def sanitize_input(text):
-    """Heuristic check for Prompt Injection attacks."""
+    """
+    Basic security check. 
+    Only blocks attempts to override system instructions.
+    Content moderation is now handled by the LLM in Phase 1.
+    """
     if not text: return ""
+    # Only block structural attacks
     forbidden_phrases = ["ignore previous instructions", "system override", "delete database", "drop table"]
     lower_text = text.lower()
     for phrase in forbidden_phrases:
         if phrase in lower_text:
             print(f"SECURITY ALERT: Prompt injection attempt -> '{phrase}'")
-            raise ValueError("Invalid input detected (Security Alert).")
+            raise ValueError("System Security Alert: Input blocked.")
     return text.strip()
 
 def get_weather_forecast(city_name, day_offset=0, coords=None):
-    """Fetches weather for a specific day."""
+    """Fetches weather for a specific day using OpenWeatherMap."""
     try:
         lat, lon, display_name = None, None, city_name
         
@@ -66,17 +75,19 @@ def get_weather_forecast(city_name, day_offset=0, coords=None):
                 rev_url = f"http://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={lon}&limit=1&appid={WEATHER_API_KEY}"
                 rev_res = requests.get(rev_url).json()
                 if rev_res: display_name = rev_res[0]['name']
-            except: display_name = "Current Location"
+            except: 
+                display_name = "Current Location"
         else:
             geo_url = f"http://api.openweathermap.org/geo/1.0/direct?q={city_name}&limit=1&appid={WEATHER_API_KEY}"
             geo_res = requests.get(geo_url).json()
-            if not geo_res: return {"temp": "--", "cond": "Not Found", "icon_code": "", "date": "Unknown", "city_name": city_name}
+            if not geo_res: 
+                return {"temp": "--", "cond": "Not Found", "icon_code": "", "date": "Unknown", "city_name": city_name}
             lat, lon = geo_res[0]['lat'], geo_res[0]['lon']
             display_name = geo_res[0]['name']
 
         # B. Fetch Forecast
         url = "http://api.openweathermap.org/data/2.5/forecast"
-        params = {"lat": lat, "lon": lon, "appid": WEATHER_API_KEY, "units": "metric", "lang": "ja"}
+        params = {"lat": lat, "lon": lon, "appid": WEATHER_API_KEY, "units": "metric", "lang": "en"}
         r = requests.get(url, params=params)
         data = r.json()
 
@@ -84,7 +95,9 @@ def get_weather_forecast(city_name, day_offset=0, coords=None):
         target_date = (datetime.now() + timedelta(days=day_offset)).strftime('%Y-%m-%d')
         daily_items = [item for item in data['list'] if target_date in item['dt_txt']]
         
-        if not daily_items: selected_weather = data['list'][-1]
+        selected_weather = None
+        if not daily_items: 
+            selected_weather = data['list'][-1]
         else:
             noon_item = next((item for item in daily_items if "12:00:00" in item['dt_txt']), None)
             selected_weather = noon_item or daily_items[0]
@@ -100,7 +113,58 @@ def get_weather_forecast(city_name, day_offset=0, coords=None):
         print(f"Weather Error: {e}")
         return {"temp": "--", "cond": "Error", "icon_code": "", "date": "Unknown", "city_name": city_name}
 
-# 4. ROUTES
+
+def process_timeline(timeline):
+    """Formats timeline items for the frontend (Map + List)."""
+    processed = []
+    
+    # Safety: Ensure timeline is actually a list
+    if not isinstance(timeline, list):
+        return []
+
+    for item in timeline:
+        # CASE A: Item is a Dictionary (Expected)
+        if isinstance(item, dict):
+            time = item.get("time", "").strip()
+            activity = item.get("activity", "").strip()
+            desc = item.get("description", "").strip()
+            coords = item.get("coordinates", [])
+            
+            # Regex Cleaning
+            activity = re.sub(r"^[-•\d\.;]+\s*", "", activity)
+            desc = re.sub(r"^[-•\d\.;]+\s*", "", desc)
+            
+            if time and time.lower() not in ["null", "none", ""]:
+                display_text = f"{time}: {activity} - {desc}"
+            else:
+                display_text = f"{activity} - {desc}"
+            
+            valid_coords = None
+            if isinstance(coords, list) and len(coords) == 2:
+                valid_coords = coords
+
+            processed.append({
+                "text": display_text,
+                "coords": valid_coords,
+                "name": activity
+            })
+
+        # CASE B: Item is a String (LLM Fallback/Error)
+        elif isinstance(item, str):
+            clean_text = re.sub(r"^[-•\d\.;]+\s*", "", item.strip())
+            processed.append({
+                "text": clean_text,
+                "coords": None,
+                "name": clean_text[:20] + "..." # truncated for marker title
+            })
+
+    return processed
+
+# --- 4. ROUTES ---
+
+@app.route('/', methods=['GET'])
+def health():
+    return "ok", 200
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
@@ -114,79 +178,90 @@ def transcribe():
             transcription = client.audio.transcriptions.create(
                 file=(filename, file.read()),
                 model="whisper-large-v3",
-                language="ja", prompt="こんにちは", response_format="json"
+                language="ja", 
+                prompt="こんにちは", 
+                response_format="json"
             )
         
         if os.path.exists(filename): os.remove(filename)
             
+        # Helper LLM call to translate transcript to English for internal logic
         trans_res = call_llm([
             {
                 "role": "system", 
-                "content": """
-                You are a strict translation engine. 
-                Task: Translate the user's text into English.
-                CRITICAL RULES:
-                1. Do NOT answer the question.
-                2. Do NOT say "I cannot check the weather".
-                3. Do NOT add explanations.
-                4. Output ONLY the translated text.
-                """
+                "content": "You are a strict translation engine. Translate to English. Output ONLY the translation."
             }, 
             {"role": "user", "content": transcription.text}
-        ])
+        ], model="openai/gpt-oss-20b")
         
-        return jsonify({"transcript": transcription.text, "translation": trans_res.choices[0].message.content})
+        return jsonify({
+            "transcript": transcription.text, 
+            "translation": trans_res.choices[0].message.content
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/generate_plan', methods=['POST'])
 def generate_plan():
     try:
-        # 1. INPUT VALIDATION (Preserved)
+        # 1. INPUT VALIDATION
         try:
             req_data = PlanRequest(**request.json)
         except ValidationError as e:
             return jsonify({"error": "Invalid Input Schema", "details": e.errors()}), 400
 
-        # 2. SANITIZATION (Preserved)
+        # 2. SANITIZATION
         user_text = sanitize_input(req_data.text)
         
-        # 3. PHASE 1: ANALYSIS (Preserved)
-        analysis_messages = [{"role": "system", "content": """
-            You are a data extractor.
-            1. Extract 'city' (English). If user says 'here'/'my location', set 'CURRENT_LOCATION'. Default 'Tokyo'.
-            2. Extract 'day_offset' (0=Today, 1=Tomorrow...).
-            3. Translate 'translation': Translate user text to the OPPOSITE language. 
-               - If Input is English -> Output Japanese.
-               - If Input is Japanese -> Output English.
+        # 3. PHASE 1: ANALYSIS (OPTIMIZED)
+        analysis_messages = [{"role": "system", "content": f"""
+            You are a smart semantic router for a Travel Concierge App.
             
-            Output strict JSON.
+            1. **SAFETY CHECK**: Is the user request related to Travel, Lifestyle, Food, Culture, or Weather?
+               - If YES: Set 'status' = 'valid'.
+               - If NO (e.g. user asks for Python code, math homework, political essays, or harmful content): Set 'status' = 'invalid'.
+            
+            2. **EXTRACTION**: If valid, extract:
+               - 'city' (English). Default 'Tokyo'. Use 'CURRENT_LOCATION' if implied.
+               - 'day_offset' (0=Today, 1=Tomorrow...).
+               - 'translation': Translate user text to opposite language (EN<->JA).
+            
+            Output strict JSON: {{ "status": "valid/invalid", "city": "...", "day_offset": 0, "translation": "..." }}
         """}]
         
         for msg in req_data.history[-2:]:
             analysis_messages.append({"role": msg['role'], "content": str(msg['content'])})
         analysis_messages.append({"role": "user", "content": user_text})
 
-        analysis_res = call_llm(analysis_messages, response_format={"type": "json_object"})
+        analysis_res = call_llm(
+            analysis_messages, 
+            response_format={"type": "json_object"},
+            model="openai/gpt-oss-20b" # <--- SPEED OPTIMIZATION
+        )
         analysis = json.loads(analysis_res.choices[0].message.content)
         
         target_city = analysis.get("city", "Tokyo")
         user_translation = analysis.get("translation", "")
         if not user_translation or user_translation == user_text: user_translation = ""
 
-        # 4. PHASE 2: WEATHER FETCH (Preserved)
+        # 4. PHASE 2: WEATHER FETCH
         if target_city == "CURRENT_LOCATION" and req_data.user_location:
             weather_data = get_weather_forecast(None, analysis.get("day_offset", 0), coords=req_data.user_location)
             target_city = weather_data['city_name']
         else:
             weather_data = get_weather_forecast(target_city, analysis.get("day_offset", 0))
 
-        # 5. PHASE 3: PLANNING (Updated for Bilingual Output)
+        # 5. PHASE 3: PLANNING & GENERATION
         
         system_prompt = f"""
         ### ROLE
         You are a world-class local concierge specializing in {req_data.category}.
         Your tone is polite, enthusiastic, and highly specific.
+
+        ### CRITICAL INSTRUCTION
+        The user has selected the category: **{req_data.category}**.
+        You MUST frame your response strictly within the domain of **{req_data.category}**.
+        If the conversation history discusses a different topic (e.g., Agriculture), IGNORE that context and pivot immediately to {req_data.category}.
 
         ### CONTEXT
         - Location: {target_city} (Date: {weather_data['date']})
@@ -195,25 +270,26 @@ def generate_plan():
 
         ### LOGIC TREE
         1. **ANALYZE INTENT**:
-           - IF GREETING (e.g., "Hi", "Hello"): Ignore weather. Return "mode": "greeting".
-           - IF PLANNING REQUEST: Use weather data to customize the plan (e.g., indoor spots for rain). Return "mode": "itinerary".
+        - IF GREETING (e.g., "Hi", "Hello"): Ignore weather. Return "mode": "greeting".
+        - IF PLANNING REQUEST: Use weather data to customize the plan. Return "mode": "itinerary".
 
         2. **EXECUTE MODE**:
-           - **GREETING MODE**:
-             - Intro: A warm, polite welcome back.
-             - Title: "Welcome" or similar greeting.
-             - Timeline: 3 suggested questions the user can ask next (e.g., "Ask about Sushi in Ginza").
-           
-           - **ITINERARY MODE**:
-             - Intro: A conversational opening sentence acknowledging the weather (e.g., "Since it is sunny tomorrow, I recommend...").
-             - Title: Short, catchy title.
-             - Weather Report: A friendly 1-sentence forecast report.
-             - Timeline: 3 chronological activities. **BE SPECIFIC**: Name specific districts, food types, or famous spots. Do not give generic advice like "Eat lunch".
-             - Emojis: No emojis are to be used anywhere.
+        - **GREETING MODE**:
+            - Intro: A warm, polite introduction describing what the concierge can help with.
+            - Title: A short greeting title such as "Welcome" or "How I Can Assist You".
+            - Timeline: 3 helpful capability prompts the user may explore next (e.g., "Find famous sushi spots in Shinjuku", "Plan a 1-day cultural itinerary", "Recommend local cafés with great ambience").
+
+        - **ITINERARY MODE**:
+            - Intro: A conversational opening sentence acknowledging the weather (e.g., "Since it is sunny tomorrow, I recommend...").
+            - Title: Short, catchy title.
+            - Weather Report: A friendly 1-sentence forecast report.
+            - Timeline: 3 chronological activities. BE SPECIFIC.
+            - CRITICAL FORMATTING: Start the activity text directly with the first letter. Do NOT use dashes, bullets, numbers, or semicolons.
+            - Emojis: No emojis are to be used anywhere.
 
         3. **FORMATTING**:
-           - Return raw JSON only.
-           - Generate content for BOTH keys: "en" and "ja".
+        - Return raw JSON only.
+        - Generate content for BOTH keys: "en" and "ja".
 
         ### OUTPUT JSON SCHEMA
         {{
@@ -224,7 +300,12 @@ def generate_plan():
                     "weather_report": "Specific forecast in English (or null)",
                     "title": "Short title in English",
                     "timeline": [
-                        {{ "time": "Time (e.g. 9:00 AM)", "activity": "Activity Name", "description": "Details" }}
+                        {{
+                            "time": "Time (e.g. 9:00 AM)",
+                            "activity": "Activity Name",
+                            "description": "Details",
+                            "coordinates": [35.6895, 139.6917]
+                        }}
                     ]
                 }},
                 "ja": {{
@@ -232,12 +313,18 @@ def generate_plan():
                     "weather_report": "Specific forecast in Japanese (or null)",
                     "title": "Short title in Japanese",
                     "timeline": [
-                        {{ "time": "Time (e.g. 9:00)", "activity": "Activity Name", "description": "Details" }}
+                        {{
+                            "time": "Time (e.g. 9:00)",
+                            "activity": "Activity Name",
+                            "description": "Details",
+                            "coordinates": [35.6895, 139.6917]
+                        }}
                     ]
                 }}
             }}
         }}
         """
+
         
         plan_messages = [{"role": "system", "content": system_prompt}]
         for msg in req_data.history:
@@ -247,22 +334,13 @@ def generate_plan():
         plan_res = call_llm(plan_messages, response_format={"type": "json_object"})
         plan_data = json.loads(plan_res.choices[0].message.content)
         
-        # Helper to format points safely
-        def format_points(timeline):
-            points = []
-            for item in timeline:
-                time = item.get("time", "").strip()
-                activity = item.get("activity", "")
-                desc = item.get("description", "")
-                if time and time.lower() not in ["null", "none", ""]:
-                    points.append(f"{time}: {activity} - {desc}")
-                else:
-                    points.append(f"{activity} - {desc}")
-            return points
-
+        # Extract content
         content = plan_data.get("content", {})
         
-        # Normalize output for frontend
+        # Process Timeline Data safely
+        en_timeline = process_timeline(content.get("en", {}).get("timeline", []))
+        ja_timeline = process_timeline(content.get("ja", {}).get("timeline", []))
+
         return jsonify({
             "city": target_city, 
             "weather": weather_data,
@@ -273,13 +351,13 @@ def generate_plan():
                     "intro": content.get("en", {}).get("intro", ""),
                     "report": content.get("en", {}).get("weather_report", ""),
                     "title": content.get("en", {}).get("title", ""),
-                    "points": format_points(content.get("en", {}).get("timeline", []))
+                    "timeline_data": en_timeline
                 },
                 "ja": {
                     "intro": content.get("ja", {}).get("intro", ""),
                     "report": content.get("ja", {}).get("weather_report", ""),
                     "title": content.get("ja", {}).get("title", ""),
-                    "points": format_points(content.get("ja", {}).get("timeline", []))
+                    "timeline_data": ja_timeline
                 }
             }
         })
@@ -289,10 +367,6 @@ def generate_plan():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-    
-@app.route('/', methods=['GET'])
-def health():
-    return "ok", 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
