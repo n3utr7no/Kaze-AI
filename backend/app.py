@@ -175,28 +175,33 @@ def transcribe():
         audio_file.save(filename)
         
         with open(filename, "rb") as file:
+            # Removed language="ja" to allow auto-detection
             transcription = client.audio.transcriptions.create(
                 file=(filename, file.read()),
                 model="whisper-large-v3",
-                language="ja", 
-                prompt="こんにちは", 
                 response_format="json"
             )
         
         if os.path.exists(filename): os.remove(filename)
             
-        # Helper LLM call to translate transcript to English for internal logic
+        # Smart Translation: Detects source and flips it
         trans_res = call_llm([
             {
                 "role": "system", 
-                "content": "You are a strict translation engine. Translate to English. Output ONLY the translation."
+                "content": """
+                You are a bilingual translation engine (English <-> Japanese).
+                1. Detect the language of the user input.
+                2. If text is English -> Translate to natural Japanese.
+                3. If text is Japanese -> Translate to natural English.
+                4. Output ONLY the translation. No explanations.
+                """
             }, 
             {"role": "user", "content": transcription.text}
         ], model="openai/gpt-oss-20b")
         
         return jsonify({
-            "transcript": transcription.text, 
-            "translation": trans_res.choices[0].message.content
+            "transcript": transcription.text, # The spoken text
+            "translation": trans_res.choices[0].message.content # The opposite language
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -214,6 +219,7 @@ def generate_plan():
         user_text = sanitize_input(req_data.text)
         
         # 3. PHASE 1: ANALYSIS (OPTIMIZED)
+        # We explicitly tell the model the target language for the translation field.
         analysis_messages = [{"role": "system", "content": f"""
             You are a smart semantic router for a Travel Concierge App.
             
@@ -221,10 +227,10 @@ def generate_plan():
                - If YES: Set 'status' = 'valid'.
                - If NO (e.g. user asks for Python code, math homework, political essays, or harmful content): Set 'status' = 'invalid'.
             
-            2. **EXTRACTION**: If valid, extract:
+            2. **EXTRACTION**: If status valid, extract:
                - 'city' (English). Default 'Tokyo'. Use 'CURRENT_LOCATION' if implied.
                - 'day_offset' (0=Today, 1=Tomorrow...).
-               - 'translation': Translate user text to opposite language (EN<->JA).
+               - 'translation': Translate the user input text into natural oppsite language of the input language (EN <-> JA).
             
             Output strict JSON: {{ "status": "valid/invalid", "city": "...", "day_offset": 0, "translation": "..." }}
         """}]
@@ -236,13 +242,14 @@ def generate_plan():
         analysis_res = call_llm(
             analysis_messages, 
             response_format={"type": "json_object"},
-            model="openai/gpt-oss-20b" # <--- SPEED OPTIMIZATION
+            model="openai/gpt-oss-20b" 
         )
         analysis = json.loads(analysis_res.choices[0].message.content)
         
         target_city = analysis.get("city", "Tokyo")
-        user_translation = analysis.get("translation", "")
-        if not user_translation or user_translation == user_text: user_translation = ""
+        
+        # FIX: Ensure translation is never None, and don't wipe it if it matches input
+        user_translation = analysis.get("translation", user_text) 
 
         # 4. PHASE 2: WEATHER FETCH
         if target_city == "CURRENT_LOCATION" and req_data.user_location:
@@ -251,8 +258,8 @@ def generate_plan():
         else:
             weather_data = get_weather_forecast(target_city, analysis.get("day_offset", 0))
 
-        # 5. PHASE 3: PLANNING & GENERATION
         
+        # 5. PHASE 3: PLANNING & GENERATION
         system_prompt = f"""
         ### ROLE
         You are a world-class local concierge specializing in {req_data.category}.
@@ -261,35 +268,35 @@ def generate_plan():
         ### CRITICAL INSTRUCTION
         The user has selected the category: **{req_data.category}**.
         You MUST frame your response strictly within the domain of **{req_data.category}**.
-        If the conversation history discusses a different topic (e.g., Agriculture), IGNORE that context and pivot immediately to {req_data.category}.
+        If the conversation history discusses a different topic, IGNORE that context and pivot immediately to {req_data.category}.
 
         ### CONTEXT
         - Location: {target_city} (Date: {weather_data['date']})
         - Weather: {weather_data['cond']} ({weather_data['temp']}°C)
-        - Target Languages: English and Japanese (Bilingual Output)
+        - Target Languages: English 
 
         ### LOGIC TREE
         1. **ANALYZE INTENT**:
-        - IF GREETING (e.g., "Hi", "Hello"): Ignore weather. Return "mode": "greeting".
-        - IF PLANNING REQUEST: Use weather data to customize the plan. Return "mode": "itinerary".
+           - IF GREETING (e.g., "Hi", "Hello"): Ignore weather. Return "mode": "greeting".
+           - IF PLANNING REQUEST: Use weather data to customize the plan. Return "mode": "itinerary".
 
         2. **EXECUTE MODE**:
-        - **GREETING MODE**:
-            - Intro: A warm, polite introduction describing what the concierge can help with.
-            - Title: A short greeting title such as "Welcome" or "How I Can Assist You".
-            - Timeline: 3 helpful capability prompts the user may explore next (e.g., "Find famous sushi spots in Shinjuku", "Plan a 1-day cultural itinerary", "Recommend local cafés with great ambience").
-
-        - **ITINERARY MODE**:
-            - Intro: A conversational opening sentence acknowledging the weather (e.g., "Since it is sunny tomorrow, I recommend...").
-            - Title: Short, catchy title.
-            - Weather Report: A friendly 1-sentence forecast report.
-            - Timeline: 3 chronological activities. BE SPECIFIC.
-            - CRITICAL FORMATTING: Start the activity text directly with the first letter. Do NOT use dashes, bullets, numbers, or semicolons.
-            - Emojis: No emojis are to be used anywhere.
+           - **GREETING MODE**:
+             - Intro: A warm, polite introduction.
+             - Title: "How can I help you today?"
+             - Timeline: 3 distinct, high-quality exploration suggestions of capabilities relevant to {req_data.category}. 
+               - **DO NOT** use generic questions like "Find sushi".
+               - **DO** use specific hooks like, "Suggest you a full day iternary" 
+           
+           - **ITINERARY MODE**:
+             - Intro: A conversational opening sentence acknowledging the weather.
+             - Title: Short, catchy title.
+             - Weather Report: A friendly 1-sentence forecast report.
+             - Timeline: 3 chronological activities. **BE SPECIFIC**: Name specific districts, food types, or famous spots. 
+             - **CRITICAL FORMATTING**: Start the activity text directly with the first letter. Do NOT use dashes (-), bullets (•), numbers (1.), or semicolons (;) at the start of the string.
 
         3. **FORMATTING**:
-        - Return raw JSON only.
-        - Generate content for BOTH keys: "en" and "ja".
+           - Return raw JSON only.
 
         ### OUTPUT JSON SCHEMA
         {{
@@ -297,27 +304,14 @@ def generate_plan():
             "content": {{
                 "en": {{
                     "intro": "Conversational opening in English",
-                    "weather_report": "Specific forecast in English (or null)",
+                    "weather_report": "Specific forecast in English",
                     "title": "Short title in English",
                     "timeline": [
-                        {{
-                            "time": "Time (e.g. 9:00 AM)",
-                            "activity": "Activity Name",
+                        {{ 
+                            "time": "Time (e.g. 9:00 AM)", 
+                            "activity": "Activity Name", 
                             "description": "Details",
-                            "coordinates": [35.6895, 139.6917]
-                        }}
-                    ]
-                }},
-                "ja": {{
-                    "intro": "Conversational opening in Japanese",
-                    "weather_report": "Specific forecast in Japanese (or null)",
-                    "title": "Short title in Japanese",
-                    "timeline": [
-                        {{
-                            "time": "Time (e.g. 9:00)",
-                            "activity": "Activity Name",
-                            "description": "Details",
-                            "coordinates": [35.6895, 139.6917]
+                            "coordinates": [35.6895, 139.6917] 
                         }}
                     ]
                 }}
@@ -325,22 +319,37 @@ def generate_plan():
         }}
         """
 
-        
         plan_messages = [{"role": "system", "content": system_prompt}]
         for msg in req_data.history:
             plan_messages.append({"role": msg['role'], "content": str(msg['content'])})
         plan_messages.append({"role": "user", "content": f"User Input: {user_text}"})
 
         plan_res = call_llm(plan_messages, response_format={"type": "json_object"})
-        plan_data = json.loads(plan_res.choices[0].message.content)
+        en_json = json.loads(plan_res.choices[0].message.content)
         
-        # Extract content
-        content = plan_data.get("content", {})
+        # --- FIX: Drill down into 'en' key ---
+        # The LLM output is { "content": { "en": { ... } } }
+        root_content = en_json.get("content", {})
+        en_data = root_content.get("en", {}) 
+        
+        # 4. TRANSLATION (Fast Model - EN -> JA)
+        # We pass only the inner 'en' data to the translator to keep structure flat
+        translation_prompt = f"""
+        You are a JSON translator. 
+        Translate the values of the following JSON object into Natural Japanese (Kanji/Kana).
+        - Keep keys exactly the same.
+        - Keep numeric coordinates exactly the same.
+        - Translate 'activity', 'description', 'intro', 'weather_report', 'title', 'time'.
+        
+        Input JSON:
+        {json.dumps(en_data)}
+        """
         
         # Process Timeline Data safely
-        en_timeline = process_timeline(content.get("en", {}).get("timeline", []))
-        ja_timeline = process_timeline(content.get("ja", {}).get("timeline", []))
+        trans_res = call_llm([{"role": "user", "content": translation_prompt}], response_format={"type": "json_object"}, model="openai/gpt-oss-20b")
+        ja_data = json.loads(trans_res.choices[0].message.content)
 
+        # 5. MERGE & RETURN
         return jsonify({
             "city": target_city, 
             "weather": weather_data,
@@ -348,16 +357,16 @@ def generate_plan():
             "user_translation": user_translation,
             "content": {
                 "en": {
-                    "intro": content.get("en", {}).get("intro", ""),
-                    "report": content.get("en", {}).get("weather_report", ""),
-                    "title": content.get("en", {}).get("title", ""),
-                    "timeline_data": en_timeline
+                    "intro": en_data.get("intro", ""),
+                    "report": en_data.get("weather_report", ""),
+                    "title": en_data.get("title", ""),
+                    "timeline_data": process_timeline(en_data.get("timeline", []))
                 },
                 "ja": {
-                    "intro": content.get("ja", {}).get("intro", ""),
-                    "report": content.get("ja", {}).get("weather_report", ""),
-                    "title": content.get("ja", {}).get("title", ""),
-                    "timeline_data": ja_timeline
+                    "intro": ja_data.get("intro", ""),
+                    "report": ja_data.get("weather_report", ""),
+                    "title": ja_data.get("title", ""),
+                    "timeline_data": process_timeline(ja_data.get("timeline", []))
                 }
             }
         })

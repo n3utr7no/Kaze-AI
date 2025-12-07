@@ -122,7 +122,7 @@ export default function App() {
   const [appState, setAppState] = useState('idle');
   const [category, setCategory] = useState('Travel');
   const [targetLang, setTargetLang] = useState('English');
-  const [transcriptData, setTranscriptData] = useState({ ja: "", en: "" });
+  const [transcriptData, setTranscriptData] = useState({ source: "", target: "" });
   const [inputText, setInputText] = useState("");
   const [playingIndex, setPlayingIndex] = useState(null);
   const [user, setUser] = useState(null);
@@ -306,6 +306,18 @@ export default function App() {
     });
   }, [targetLang]);
 
+  // --- WATCHDOG: Force reset state if stuck for > 60s ---
+  useEffect(() => {
+    let timeout;
+    if (appState === 'planning' || appState === 'transcribing') {
+      timeout = setTimeout(() => {
+        setAppState('idle');
+        showNotification("Request timed out. Please try again.", "error");
+      }, 60000); // 60s timeout
+    }
+    return () => clearTimeout(timeout);
+  }, [appState]);
+
   // --- AUDIO LOGIC ---
   const startRecording = async () => {
     try {
@@ -375,19 +387,29 @@ export default function App() {
   };
 
   const handleStopAndTranscribe = async (mimeType) => {
+    // 1. Create the blob from chunks
     const blob = new Blob(audioChunksRef.current, { type: mimeType });
+
+    // 2. Check if recording actually captured data
     if (blob.size === 0) {
       setAppState('idle');
       return;
     }
+
     setAppState('transcribing');
+
     const formData = new FormData();
     const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+
+    // 3. Append the defined blob
     formData.append('audio', blob, `voice.${ext}`);
 
     try {
       const res = await axios.post(`${API_URL}/transcribe`, formData);
-      setTranscriptData({ ja: res.data.transcript, en: res.data.translation });
+      setTranscriptData({
+        source: res.data.transcript,
+        target: res.data.translation
+      });
       setAppState('verification');
     } catch (error) {
       console.error("Transcription Failed:", error);
@@ -440,17 +462,26 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   };
 
-  const executePlanGeneration = async (textInput, isVoice = false) => {
+  // UPDATED: Added preTranslation argument
+  const executePlanGeneration = async (textInput, isVoice = false, preTranslation = null) => {
     if (!user || !db) return;
+
+    const safeInput = textInput ? String(textInput).trim() : "";
+    if (!safeInput) return;
+
     setAppState('planning');
     const historyRef = collection(db, 'artifacts', appId, 'users', user.uid, 'chat_history');
+
+    // 1. Determine Subtitle immediately
+    // If voice (and translation exists), use it. If text, use placeholder.
+    const initialSub = preTranslation || "Translating...";
 
     let userDocRef = null;
     try {
       const docRef = await addDoc(historyRef, {
         type: 'user',
-        main: textInput,
-        sub: "Translating...",
+        main: safeInput,
+        sub: initialSub, // <--- CHANGED: Uses pre-calculated translation if available
         isVoice: isVoice,
         createdAt: serverTimestamp()
       });
@@ -471,7 +502,7 @@ export default function App() {
 
     try {
       const res = await axios.post(`${API_URL}/generate_plan`, {
-        text: textInput,
+        text: safeInput,
         category: category,
         language: targetLang,
         history: historyContext,
@@ -480,7 +511,8 @@ export default function App() {
 
       const data = res.data;
 
-      if (!isVoice && userDocRef) {
+      // 2. Only update subtitle from Backend if it wasn't provided initially (Text Input case)
+      if (!preTranslation && userDocRef) {
         await updateDoc(userDocRef, { sub: data.user_translation });
       }
 
@@ -521,10 +553,9 @@ export default function App() {
     }
   };
 
+
   const handleConfirmVoice = () => {
-    const mainText = targetLang === 'English' ? transcriptData.en : transcriptData.ja;
-    const subText = targetLang === 'English' ? transcriptData.ja : transcriptData.en;
-    executePlanGeneration(transcriptData.ja, true);
+    executePlanGeneration(transcriptData.source, true, transcriptData.target);
   };
 
   const handleTextSubmit = (e) => {
@@ -535,7 +566,7 @@ export default function App() {
   };
 
   const handleRetry = () => {
-    setTranscriptData({ ja: "", en: "" });
+    setTranscriptData({ source: "", target: "" }); // Reset new state structure
     setAppState('idle');
   };
 
@@ -688,9 +719,19 @@ export default function App() {
 
                           {(() => {
                             const langKey = msg.displayLang === 'English' ? 'en' : 'ja';
-                            // Safe check for undefined content (prevents crash on old data or sync delay)
+                            // Safe check for undefined content
                             const content = msg.data.content?.[langKey] || { title: "Loading...", report: "", timeline_data: [] };
                             const toggleLabel = msg.displayLang === 'English' ? '日本語' : 'English';
+
+                            // FIX 2: MAP VISIBILITY
+                            // Always use English coordinates (source of truth) to ensure map renders in Japanese mode
+                            // Zip them with the current language's labels
+                            const enTimeline = msg.data.content?.en?.timeline_data || [];
+                            const mapPoints = enTimeline.map((enItem, i) => ({
+                              coords: enItem.coords,
+                              // Try to get the translated name, fallback to English name
+                              name: content.timeline_data?.[i]?.name || enItem.name
+                            })).filter(p => p.coords);
 
                             return (
                               <>
@@ -725,41 +766,44 @@ export default function App() {
                                 )}
 
                                 {/* Timeline / Points */}
-                                <ul className="space-y-3 mb-5">
-                                  {content.timeline_data?.map((item, i) => (
-                                    <li key={i} className="flex items-start gap-3 text-sm text-slate-600 leading-relaxed group">
-                                      {/* FIXED: Changed mt-1.5 to mt-2.5 to perfectly center dot with the first line of text */}
-                                      <span className={`mt-2.5 w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${CATEGORY_THEMES[msg.data.category]?.solid} opacity-60 group-hover:opacity-100`}></span>
+                                <ul className="space-y-3 mb-5 list-none pl-0">
+                                  {content.timeline_data?.map((item, i) => {
+                                    // FIX 1: TIME VISIBILITY
+                                    // Removed \d and \. from regex so it doesn't strip "9:00" or "10."
+                                    const cleanText = item.text.replace(/^[-–—•・\s]+/, '').trim();
 
-                                      {/* FIXED: Added clean regex to remove redundant hyphens from backend text */}
-                                      <span className="flex-1">
-                                        {item.text.replace(/^-\s*/, '')}
-                                      </span>
-                                    </li>
-                                  ))}
+                                    if (!cleanText || cleanText === ":" || cleanText.startsWith(": -")) return null;
+
+                                    return (
+                                      <li key={i} className="flex items-start gap-3 text-sm text-slate-600 leading-relaxed group">
+                                        <span className={`mt-2.5 w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${CATEGORY_THEMES[msg.data.category]?.solid} opacity-60 group-hover:opacity-100`}></span>
+                                        <span className="flex-1">
+                                          {cleanText}
+                                        </span>
+                                      </li>
+                                    );
+                                  })}
                                 </ul>
 
-                                {/* MAP COMPONENT (Protected) */}
-                                {content.timeline_data?.some(i => i.coords) && (
+                                {/* MAP COMPONENT (Updated Logic) */}
+                                {mapPoints.length > 0 && (
                                   <div className="mb-5 h-48 w-full rounded-xl overflow-hidden border border-slate-200 shadow-inner relative z-0">
                                     <MapContainer
-                                      center={content.timeline_data.find(i => i.coords)?.coords || [35.6762, 139.6503]}
+                                      center={mapPoints[0].coords || [35.6762, 139.6503]}
                                       zoom={11}
                                       scrollWheelZoom={false}
                                       className="h-full w-full"
                                     >
                                       <TileLayer
-                                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                                        attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                                         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                                       />
-                                      {content.timeline_data.map((item, i) => (
-                                        item.coords && (
-                                          <Marker key={i} position={item.coords}>
-                                            <Popup>
-                                              <span className="font-bold text-xs">{item.name}</span>
-                                            </Popup>
-                                          </Marker>
-                                        )
+                                      {mapPoints.map((item, i) => (
+                                        <Marker key={i} position={item.coords}>
+                                          <Popup>
+                                            <span className="font-bold text-xs">{item.name}</span>
+                                          </Popup>
+                                        </Marker>
                                       ))}
                                     </MapContainer>
                                   </div>
@@ -830,8 +874,14 @@ export default function App() {
                       <Languages size={12} /> Voice Input Detected
                     </div>
                     <div className="mb-4">
-                      <p className="text-base font-bold text-slate-900 leading-snug">"{targetLang === 'English' ? transcriptData.en : transcriptData.ja}"</p>
-                      <p className="text-sm text-slate-400 italic mt-1">{targetLang === 'English' ? transcriptData.ja : transcriptData.en}</p>
+                      {/* TOP: Always the Spoken Text (Source) */}
+                      <p className="text-base font-bold text-slate-900 leading-snug">
+                        "{transcriptData.source}"
+                      </p>
+                      {/* BOTTOM: Always the Translation (Target) */}
+                      <p className="text-sm text-slate-400 italic mt-1">
+                        {transcriptData.target}
+                      </p>
                     </div>
                     <div className="flex gap-2">
                       <button onClick={handleRetry} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold text-slate-600">Retry</button>
@@ -887,7 +937,7 @@ export default function App() {
                       )}
 
                       {/* RIGHT: TEXT INPUT BOX */}
-                      <div className="flex-1 relative flex items-center gap-2 bg-white border border-slate-200 rounded-2xl p-2 shadow-lg shadow-slate-200/50">
+                      <div className="flex-1 w-full relative flex items-center gap-2 bg-white border border-slate-200 rounded-2xl p-2 shadow-lg shadow-slate-200/50">
                         <form onSubmit={handleTextSubmit} className="flex-1 flex items-center">
                           <input
                             type="text"
@@ -897,13 +947,21 @@ export default function App() {
                             disabled={appState !== 'idle'}
                             className="w-full bg-transparent border-none outline-none focus:ring-0 focus:outline-none text-sm px-3 text-slate-800 placeholder:text-slate-400 h-8"
                           />
+
+                          {/* SUBMIT BUTTON INSIDE FORM */}
+                          {inputText.trim().length > 0 && (
+                            <button
+                              type="submit" // Rely on form submission
+                              disabled={appState !== 'idle'}
+                              className="p-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-all shadow-md h-8 w-8 flex items-center justify-center"
+                            >
+                              <Send size={16} />
+                            </button>
+                          )}
                         </form>
 
-                        {inputText.trim().length > 0 ? (
-                          <button onClick={handleTextSubmit} disabled={appState !== 'idle'} className="p-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-all shadow-md h-8 w-8 flex items-center justify-center">
-                            <Send size={16} />
-                          </button>
-                        ) : (
+                        {/* MICROPHONE / LOADING STATE (Outside Form) */}
+                        {inputText.trim().length === 0 && (
                           (appState === 'transcribing' || appState === 'planning') ? (
                             <div className="p-2 rounded-xl bg-slate-100 text-slate-400 w-8 h-8 flex items-center justify-center">
                               <RefreshCw size={16} className="animate-spin" />
