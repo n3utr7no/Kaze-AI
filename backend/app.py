@@ -21,6 +21,9 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 client = Groq(api_key=GROQ_API_KEY)
 
+# --- VISITOR IP TRACKING ---
+visitor_ips = []
+
 # --- 2. VALIDATION MODELS ---
 class PlanRequest(BaseModel):
     text: str = Field(..., min_length=1, description="User input text")
@@ -165,6 +168,23 @@ def process_timeline(timeline):
 @app.route('/', methods=['GET'])
 def health():
     return "ok", 200
+
+@app.route('/log_visitor', methods=['POST'])
+def log_visitor():
+    """Log visitor IP address with timestamp"""
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if ip:
+        ip = ip.split(',')[0].strip()  # Get first IP if multiple
+    visitor_ips.append({
+        "ip": ip,
+        "timestamp": datetime.now().isoformat()
+    })
+    return jsonify({"status": "ok", "ip": ip})
+
+@app.route('/get_visitors', methods=['GET'])
+def get_visitors():
+    """Return all logged visitor IPs"""
+    return jsonify({"visitors": visitor_ips})
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():

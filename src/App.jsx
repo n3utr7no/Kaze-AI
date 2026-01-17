@@ -4,7 +4,7 @@ import {
   Mic, RefreshCw, ExternalLink, Languages, Sparkles, Send,
   Plane, Shirt, Music, Sprout, Trophy, Globe, Wind, Info,
   Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Volume2, StopCircle,
-  Trash2, AlertTriangle
+  Trash2, AlertTriangle, Users, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import 'leaflet/dist/leaflet.css';
@@ -128,6 +128,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [chatHistory, setChatHistory] = useState([]); const [notification, setNotification] = useState(null);
   const [showClearModal, setShowClearModal] = useState(false);
+  const [visitors, setVisitors] = useState([]);
+  const [showVisitors, setShowVisitors] = useState(false);
 
   // --- REFS ---
   const mediaRecorderRef = useRef(null);
@@ -283,6 +285,21 @@ export default function App() {
         (error) => console.log("GPS Error:", error)
       );
     }
+  }, []);
+
+  // --- EFFECT: VISITOR IP TRACKING ---
+  useEffect(() => {
+    // Log this visitor
+    axios.post(`${API_URL}/log_visitor`).catch(console.error);
+    // Fetch all visitors
+    const fetchVisitors = () => {
+      axios.get(`${API_URL}/get_visitors`)
+        .then(res => setVisitors(res.data.visitors || []))
+        .catch(console.error);
+    };
+    fetchVisitors();
+    const interval = setInterval(fetchVisitors, 10000); // Refresh every 10s
+    return () => clearInterval(interval);
   }, []);
 
   // --- EFFECT 4: SCROLLING ---
@@ -686,6 +703,38 @@ export default function App() {
                       <span className="text-[8px] font-normal opacity-70 leading-none transform scale-90">日本語</span>
                     </button>
                   </div>
+                </div>
+
+                {/* VISITORS PANEL */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowVisitors(!showVisitors)}
+                    className="flex items-center gap-2 px-3 py-2 bg-slate-100/80 rounded-lg border border-slate-200 hover:bg-slate-200/80 transition-colors"
+                  >
+                    <Users size={16} className="text-slate-500" />
+                    <span className="text-xs font-bold text-slate-600">{visitors.length}</span>
+                    {showVisitors ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+                  </button>
+
+                  {showVisitors && (
+                    <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden">
+                      <div className="px-3 py-2 bg-slate-50 border-b border-slate-100">
+                        <span className="text-xs font-bold text-slate-600">Visitor IPs ({visitors.length})</span>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto">
+                        {visitors.length === 0 ? (
+                          <div className="px-3 py-4 text-center text-xs text-slate-400">No visitors yet</div>
+                        ) : (
+                          visitors.slice().reverse().map((v, i) => (
+                            <div key={i} className="px-3 py-2 border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                              <div className="text-xs font-mono text-slate-700">{v.ip}</div>
+                              <div className="text-[10px] text-slate-400">{new Date(v.timestamp).toLocaleString()}</div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </header>
